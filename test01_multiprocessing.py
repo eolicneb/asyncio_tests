@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 
-import asyncio
+from multiprocessing import Process, Manager
+from ctypes import c_double
 import numpy as np
 
 dif = 1e-6
@@ -19,50 +20,50 @@ class SphereDE():
     def __init__(self, radius=1., pos=np.array((0,0,0))):
         self.radius = radius
         self.pos = pos
-    async def __call__(self, P: np.ndarray) -> float:
+    def __call__(self, P: np.ndarray) -> float:
         return np.linalg.norm(P - self.pos) - self.radius
 
 class PlaneDE():
     def __init__(self, normal=np.array((0,0,1)), pos=np.array((0,0,0))):
         self.pos = pos
         self.normal = normal/np.linalg.norm(normal)
-    async def __call__(self, p: np.ndarray) -> float:
+    def __call__(self, p: np.ndarray) -> float:
         return ((p-self.pos)*self.normal).sum()
 
 class ComposeDE():
     def __init__(self, bodys=[]):
         self.bodys = bodys # each element in bodys must by a DE function
     
-    async def __call__(self, p: np.ndarray) -> float:
-        des = await asyncio.gather(*[DE(p) for DE in self.bodys])
+    def __call__(self, p: np.ndarray) -> float:
+        des = [DE(p) for DE in self.bodys]
         return min(des)
 
-async def normal(p, DE, de=None, dif=1e-6):
+def normal(p, DE, de=None, dif=1e-6):
     if not de:
-        de = await DE(p)
-    v123 = await asyncio.gather(*[DE(p+d*dif) for d in deltas])
+        de = DE(p)
+    v123 = [DE(p+d*dif) for d in deltas]
     t123 = (np.array(v123)-de)/dif
     n123 = t123/np.linalg.norm(t123)
     return n123
 
-async def ambient_light(normal: np.ndarray, light: np.ndarray) -> float:
+def ambient_light(normal: np.ndarray, light: np.ndarray) -> float:
     shade = (normal*light).sum()
     return max(0.0, shade)
 
-async def shadow(p, normal, light, DE, light_spread=0.001) -> float:
+def shadow(p, normal, light, DE, light_spread=0.001) -> float:
     if (normal*light).sum() < 0.:
         return 0.
     # need to start away from the surfice we are on
     q = p + normal*1*DIST_LIMIT 
 
-    de = await DE(q)
+    de = DE(q)
     away_dist = 0.
     min_de = None
     counter = 0
     while de > DIST_LIMIT and counter < COUNT_LIMIT and away_dist < MAX_DIST:
         away_dist += de
         q = q + light*de
-        de = await DE(q)
+        de = DE(q)
         if de < light_spread*away_dist:
             if min_de:
                 min_de = min(min_de, de)
@@ -78,31 +79,32 @@ async def shadow(p, normal, light, DE, light_spread=0.001) -> float:
     # otherwise return oclussion by nearby edges
     return min(1., (min_de/away_dist/light_spread)**2)
 
-async def march(origin, direction, DE, light: np.ndarray) -> np.ndarray:
+def march(origin, direction, DE, light: np.ndarray, image, index) -> np.ndarray:
     """
     :params: origin
     :params: direction
     :params DE function: DE  # this function must take a (3,)np.ndarray and return a float
     :params (3,)np.ndarray: light  # the direction from where the ambient light comes
     """
+    # print('march ', index)
     p, v = origin, direction
     counter, away_dist =  0, 0.
-    de = await DE(p)
+    de = DE(p)
     while de > DIST_LIMIT and counter < COUNT_LIMIT and away_dist < MAX_DIST:
         p = p + v*de
         counter += 1
-        de = await DE(p)
+        de = DE(p)
         
     if de > DIST_LIMIT:
         return np.zeros(3)
 
-    n = await normal(p, DE, de)
-    shaded = await ambient_light(n, light)
-    shadowed = await shadow(p, n, light, DE, light_spread=.2)
+    n = normal(p, DE, de)
+    shaded = ambient_light(n, light)
+    shadowed = shadow(p, n, light, DE, light_spread=.2)
+    # print(f'index {index} finished. p={(origin*100).astype(int)}. d={(direction*100).astype(int)}. n={(n*100).astype(int)}')
+    image[index] = n*(shaded*shadowed*.8 + .2)
 
-    return n*(shaded*shadowed*.8 + .2)
-
-async def render(origin, target, DE, light, shape=(80,80), limits=((-1,1),(-1,1)), diag=1.):
+def render(origin, target, DE, light, shape=(80,80), limits=((-1,1),(-1,1)), diag=1.):
     # direction is normalized, comes from origin and points to the target
     direction = target - origin
     dir_versor = direction/np.linalg.norm(direction)
@@ -113,14 +115,25 @@ async def render(origin, target, DE, light, shape=(80,80), limits=((-1,1),(-1,1)
     y = np.linspace(*limits[1], shape[1])
     xyz_meshgrid = np.meshgrid(y, x, (10,), indexing='xy')
     xyz_vector = (v.reshape(-1,1,1) for v in xyz_meshgrid)
-    space = (np.array(q).reshape(3) for q in zip(*xyz_vector))
+    screen = [np.array(q).reshape(3) for q in zip(*xyz_vector)]
+
+    # This multiprocessing.Manager.list is the key
+    image = Manager().list(range(len(screen)))
+    print(len(image))
     # march performs the render for every pixel in the screen
-    image = await asyncio.gather(*[march(p,dir_versor,DE,light) for p in space])
+    tasks = [Process(target=march, args=(p,dir_versor,DE,light,image,idx)) \
+                for idx, p in enumerate(screen)]
+    print(len(tasks))
+    for idx, task in enumerate(tasks):
+        task.start()
+    print('Were rendering...')
+    for task in tasks:
+        task.join()
     print('render finished')
     return np.array(image).reshape(*shape,3)
 
-async def stereo(kwargsL, kwargsR):
-    return await asyncio.gather(render(**kwargsL), render(**kwargsR))
+def stereo(kwargsL, kwargsR):
+    return render(**kwargsL), render(**kwargsR)
 
 if __name__ == "__main__":
     import time
@@ -136,8 +149,8 @@ if __name__ == "__main__":
     light = np.array((1.,1.,1.))
     eye = np.array((.2,.0,.0))
 
-    shape = (200, 200)
-    limits = ((-2,1.5),(-2,1.5))
+    shape = (20, 20)
+    limits = ((-1,1),(-1,1))
 
     stereo_kws =    (dict(origin=origin+eye, target=target, 
                         DE=comp_DE, light=light, 
@@ -146,14 +159,14 @@ if __name__ == "__main__":
                         DE=comp_DE, light=light, 
                         shape=shape, limits=limits))
     
-    imageL, imageR = asyncio.run(stereo(*stereo_kws))
+    # imageL, imageR = (stereo(*stereo_kws))
 
-    # image = asyncio.run(render(**stereo_kws[0]))
+    image = (render(**stereo_kws[0]))
 
     elapsed = time.perf_counter() - s
     print(f"{__file__} executed in {elapsed:0.6f} seconds.")
     # print(f'image size {image.shape}')
     import matplotlib.pyplot as plt
-    plt.imshow(np.concatenate([imageL,imageR], axis=1))
-    # plt.imshow(image)
+    # plt.imshow(np.concatenate([imageL,imageR], axis=1))
+    plt.imshow(image)
     plt.show()
