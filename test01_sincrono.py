@@ -34,6 +34,8 @@ class ComposeDE():
         self.bodys = bodys # each element in bodys must by a DE function
     
     def __call__(self, p: np.ndarray) -> float:
+        # des = np.array([DE(p) for DE in self.bodys])
+        # return des.min()
         des = [DE(p) for DE in self.bodys]
         return min(des)
 
@@ -102,6 +104,20 @@ def march(origin, direction, DE, light: np.ndarray) -> np.ndarray:
 
     return n*(shaded*shadowed*.8 + .2)
 
+def screen_limits(shape, diag):
+    semi_shape = np.array(*shape)/2.
+    semi_diag = np.linalg.norm(semi_shape)
+
+class Screen():
+    def __init__(self, origin, target, shape=(80,80), diag=1.):
+        self.origin = origin
+        self.target = target
+        semi_shape = np.array(*shape).astype(double)/2.
+        semi_diag = diag/np.linalg.norm(semi_shape)
+        self.x = semi_diag/semi_shape[1]
+        self.y = semi_diag/semi_shape[0]
+    
+
 def render(origin, target, DE, light, shape=(80,80), limits=((-1,1),(-1,1)), diag=1.):
     # direction is normalized, comes from origin and points to the target
     direction = target - origin
@@ -136,7 +152,7 @@ if __name__ == "__main__":
     light = np.array((1.,1.,1.))
     eye = np.array((.2,.0,.0))
 
-    shape = (20, 20)
+    shape = (80, 80)
     limits = ((-1,1),(-1,1))
 
     stereo_kws =    (dict(origin=origin+eye, target=target, 
