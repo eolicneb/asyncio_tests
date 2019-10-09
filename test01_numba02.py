@@ -120,7 +120,7 @@ s = time.perf_counter()
 
 @jit(nopython=True)
 def fase_DE(p, fase):
-    ax1 = np.array((.3, -1., .7))*np.sin(fase)
+    ax1 = np.array((.3, -2., .7))*np.sin(fase)
     ax2 = np.array((.6, .6, .1))*np.cos(fase)
     centre = np.array((.0, .4, .0))
     satelite = centre + ax1 + ax2
@@ -136,7 +136,7 @@ target = np.array((0.,0.,0.))
 light = np.array((1.,1.,1.))
 eye = np.array((.2,.0,.0))
 
-shape = (20, 20)
+shape = (200, 200)
 limits = ((-2,1.5),(-2,1.5))
 
 # space is a list of points in the space from where the ray-marching starts
