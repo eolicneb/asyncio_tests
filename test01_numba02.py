@@ -120,9 +120,9 @@ s = time.perf_counter()
 
 @jit(nopython=True)
 def fase_DE(p, fase):
-    ax1 = np.array((.3, -2., .7))*np.sin(fase)
+    ax1 = np.array((.4, -1., .5))*np.sin(fase)
     ax2 = np.array((.6, .6, .1))*np.cos(fase)
-    centre = np.array((.0, .4, .0))
+    centre = np.array((.0, .2, .0))
     satelite = centre + ax1 + ax2
 
     a = np.linalg.norm(p - centre) - .5
@@ -136,7 +136,7 @@ target = np.array((0.,0.,0.))
 light = np.array((1.,1.,1.))
 eye = np.array((.2,.0,.0))
 
-shape = (200, 200)
+shape = (400, 400)
 limits = ((-2,1.5),(-2,1.5))
 
 # space is a list of points in the space from where the ray-marching starts
@@ -185,7 +185,7 @@ from os import rename
 
 fig = plt.figure()
 ax = fig.add_axes([0, 0, 1, 1])
-im = ax.imshow(new_image(-3.14))
+im = ax.imshow(new_image(0.))
 
 def update(i):
     im.set_data(new_image(i))
@@ -193,7 +193,7 @@ def update(i):
 
 file = str(time.time())+'.gif'
 p = time.perf_counter()
-fnAn = FuncAnimation(fig, update, frames=np.linspace(-3.14,3.14,10), interval=.02, blit=True, repeat=True)
+fnAn = FuncAnimation(fig, update, frames=np.linspace(np.pi/12,2*np.pi,24), interval=.02, blit=True, repeat=True)
 fnAn.save(file, dpi=80, writer='imagemagick')
 elapsed = int(time.perf_counter() - p)
 # rename(file, f'numbatest_eta{elapsed:d}s.gif')
