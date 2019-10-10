@@ -8,6 +8,7 @@ dif = 1e-6
 DIST_LIMIT = 1e-3
 COUNT_LIMIT = 100
 MAX_DIST = 30
+REFLEXES = 1
 
 deltas = np.eye(3)
 
@@ -24,6 +25,8 @@ def normal(p: np.ndarray, DE, de: np.double, dif: np.double=1e-6) -> np.ndarray:
     leng = np.linalg.norm(n)
     n = n/leng
     return n
+
+def reflex(p, n, remaining_reflex):
     
 @jit(nopython=True)
 def shadow(p, normal, light, DE, light_spread=0.001) -> float:
@@ -74,7 +77,7 @@ def march(origin, direction, DE, light: np.ndarray) -> np.ndarray:
 
     de = DE(p)
     dist_limit = False
-    for counter in range(MAX_DIST):
+    for counter in range(COUNT_LIMIT):
         if not (de > DIST_LIMIT and away_dist < MAX_DIST):
             dist_limit = True
             break
@@ -173,15 +176,20 @@ def new_image(fase, wide):
 
 import matplotlib.pyplot as plt    
 from matplotlib.animation import FuncAnimation
+from matplotlib.image import imsave
 from os import rename
 
 fig = plt.figure()
 ax = fig.add_axes([0, 0, 1, 1])
 
 s = time.time()
-im = ax.imshow(new_image(s, 800))
+rendered_image = np.clip(new_image(s, 400), 0, 1)
 eta = (time.time() - s)
 print('render finished in ', eta, ' s')
+
+file_ = str(time.time())+'.jpg'
+imsave(file_, rendered_image)
+im = ax.imshow(rendered_image)
 
 
 plt.show()

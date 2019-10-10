@@ -73,7 +73,7 @@ def march(origin, direction, DE, light: np.ndarray) -> np.ndarray:
 
     de = DE(p)
     dist_limit = False
-    for counter in range(MAX_DIST):
+    for counter in range(COUNT_LIMIT):
         if not (de > DIST_LIMIT and away_dist < MAX_DIST):
             dist_limit = True
             break
