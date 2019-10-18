@@ -19,14 +19,25 @@ class SphereDE():
         self.radius = radius
         self.pos = pos
     def __call__(self, P: np.ndarray) -> float:
-        return np.linalg.norm(P - self.pos) - self.radius
+        rod = P - self.pos
+        dist = np.linalg.norm(rod)
+        de = dist - self.radius
+        color = np.array([abs(rod[i])/dist<0.8 for i in range(3)], dtype=np.double)
+        normal = rod/dist
+        return de, color, normal
 
 class PlaneDE():
     def __init__(self, normal=np.array((0,0,1)), pos=np.array((0,0,0))):
         self.pos = pos
         self.normal = normal/np.linalg.norm(normal)
     def __call__(self, p: np.ndarray) -> float:
-        return ((p-self.pos)*self.normal).sum()
+        rod = p - self.pos
+        de = (self.normal*rod).sum()
+        normal = self.normal 
+        if de < 0:
+            de, normal = -de, -normal
+        color = np.array((0,0,1), dtype=np.double)
+        return de, color, normal
 
 class ComposeDE():
     def __init__(self, bodys=[]):
@@ -35,13 +46,18 @@ class ComposeDE():
     def __call__(self, p: np.ndarray) -> float:
         # des = np.array([DE(p) for DE in self.bodys])
         # return des.min()
-        des = [DE(p) for DE in self.bodys]
-        return min(des)
+        des_ = [DE(p) for DE in self.bodys]
+        des, colors, normals = zip(*des_)
+        min_de = np.argmin(des)
+        return des[min_de], colors[min_de], normals[min_de]
 
 def normal(p, DE, de=None, dif=1e-6):
     if not de:
-        de = DE(p)
-    v123 = [DE(p+d*dif) for d in deltas]
+        de, color, nor = DE(p)
+        if nor:
+            return nor
+    v123_ = [DE(p+d*dif) for d in deltas]
+    v123, _, _ = zip(*v123_)
     t123 = (np.array(v123)-de)/dif
     n123 = t123/np.linalg.norm(t123)
     return n123
@@ -56,14 +72,14 @@ def shadow(p, normal, light, DE, light_spread=0.001) -> float:
     # need to start away from the surfice we are on
     q = p + normal*1*DIST_LIMIT 
 
-    de = DE(q)
+    de, color, normal = DE(q)
     away_dist = 0.
     min_de = None
     counter = 0
     while de > DIST_LIMIT and counter < COUNT_LIMIT and away_dist < MAX_DIST:
         away_dist += de
         q = q + light*de
-        de = DE(q)
+        de, color, normal = DE(q)
         if de < light_spread*away_dist:
             if min_de:
                 min_de = min(min_de, de)
@@ -77,7 +93,7 @@ def shadow(p, normal, light, DE, light_spread=0.001) -> float:
     if not min_de:
         return 1.
     # otherwise return oclussion by nearby edges
-    return min(1., (min_de/away_dist/light_spread)**2)
+    return min(1., min_de/light_spread)
 
 def march(origin, direction, DE, light: np.ndarray) -> np.ndarray:
     """
@@ -88,20 +104,20 @@ def march(origin, direction, DE, light: np.ndarray) -> np.ndarray:
     """
     p, v = origin, direction
     counter, away_dist =  0, 0.
-    de = DE(p)
+    de, color, nor = DE(p)
     while de > DIST_LIMIT and counter < COUNT_LIMIT and away_dist < MAX_DIST:
         p = p + v*de
         counter += 1
-        de = DE(p)
+        de, color, nor = DE(p)
         
     if de > DIST_LIMIT:
         return np.zeros(3)
 
-    n = normal(p, DE, de)
+    n = normal(p, DE, de) if nor is None else nor
     shaded = ambient_light(n, light)
     shadowed = shadow(p, n, light, DE, light_spread=.2)
 
-    return n*(shaded*shadowed*.8 + .2)
+    return color*(shaded*shadowed*.8 + .2)
 
 class Screen():
     def __init__(self, origin, target, shape=(80,80), diag=1.):
@@ -116,32 +132,27 @@ class Screen():
         self.x = unit*horiz_/np.linalg.norm(horiz_)
         self.y = unit*verti_/np.linalg.norm(verti_)
     def __iter__(self):
-        xr, yr = self.shape
-        x0, y0 = -xr/2, -yr/2
-        self.iterable = ((n%xr+x0, n//xr+y0) for n in range(xr*yr))
+        yr, xr = self.shape
+        x0, y0 = xr/2, yr/2
+        self.iterable = ((-x0+n%xr, y0-n//xr) for n in range(xr*yr))
         return self
     def __next__(self):
         i, j = next(self.iterable)
-        return self.main_axe + i*self.x + j*self.y
-    
-    
+        v = self.main_axe + i*self.x + j*self.y
+        return v/np.linalg.norm(v)
 
-def render(origin, target, DE, light, shape=(80,80), limits=((-1,1),(-1,1)), diag=1.):
-    # direction is normalized, comes from origin and points to the target
-    direction = target - origin
-    dir_versor = direction/np.linalg.norm(direction)
+def smooth(image):
+    new_image = image[:-1,:-1,:] + image[:-1,1:,:] + image[1:,:-1,:] + image[1:,1:,:]
+    return new_image/4.
+
+def render(screen, DE, light):
     # light needs to be normalized
     light = light.copy()/np.linalg.norm(light)
-    # space is a list of points in the space from where the ray-marching starts
-    x = np.flip(np.linspace(*limits[r], shape[0]))
-    y = np.linspace(*limits[1], shape[1])
-    xyz_meshgrid = np.meshgrid(y, x, (10,), indexing='xy')
-    xyz_vector = (v.reshape(-1,1,1) for v in xyz_meshgrid)
-    space = (np.array(q).reshape(3) for q in zip(*xyz_vector))
     # march performs the render for every pixel in the screen
-    image = [march(p,dir_versor,DE,light) for p in space]
+    image = [march(screen.origin,dir,DE,light) for dir in screen]
     print('render finished')
-    return np.array(image).reshape(*shape,3)
+    image = np.array(image).reshape(*screen.shape,3)
+    return smooth(image)
 
 def stereo(kwargsL, kwargsR):
     return render(**kwargsL), render(**kwargsR)
@@ -155,29 +166,35 @@ if __name__ == "__main__":
     pln_DE = PlaneDE(normal=np.array((0, .1, 1.)), pos=np.array((0,0,-1)))
     comp_DE = ComposeDE([sph_DE, sph2_DE, pln_DE])
 
-    origin = np.array((0.,0.,5.))
-    target = np.array((0.,0.,0.))
+    origin = np.array((5.,-2.,2.))
+    target = np.array((0.,-.3,0.))
     light = np.array((1.,1.,1.))
-    eye = np.array((.2,.0,.0))
+    eye = np.array((.6,.0,.0))
 
-    shape = (80, 80)
-    limits = ((-1,1),(-1,1))
+    shape = (400, 340)
+    diagonal = 4.5
 
-    stereo_kws =    (dict(origin=origin+eye, target=target, 
-                        DE=comp_DE, light=light, 
-                        shape=shape, limits=limits),
-                    dict(origin=origin-eye, target=target, 
-                        DE=comp_DE, light=light, 
-                        shape=shape, limits=limits))
+    stereo_kws = (dict(screen=Screen(origin=origin+eye,
+                                     target=target,
+                                     shape=shape,
+                                     diag=diagonal), 
+                       DE=comp_DE, 
+                       light=light),
+                  dict(screen=Screen(origin=origin-eye,
+                                     target=target,
+                                     shape=shape,
+                                     diag=diagonal), 
+                       DE=comp_DE, 
+                       light=light))
     
-    # imageL, imageR = (stereo(*stereo_kws))
+    imageL, imageR = stereo(*stereo_kws)
 
-    image = (render(**stereo_kws[0]))
+    # image = (render(**stereo_kws[0]))
 
     elapsed = time.perf_counter() - s
     print(f"{__file__} executed in {elapsed:0.6f} seconds.")
     # print(f'image size {image.shape}')
     import matplotlib.pyplot as plt
-    # plt.imshow(np.concatenate([imageL,imageR], axis=1))
-    plt.imshow(image)
+    plt.imshow(np.concatenate([imageL,imageR], axis=1))
+    # plt.imshow(image)
     plt.show()

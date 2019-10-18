@@ -2,19 +2,17 @@
 # import scipy
 from numba import jit
 import numpy as np
-import time
 
 dif = 1e-6
 DIST_LIMIT = 1e-3
 COUNT_LIMIT = 100
 MAX_DIST = 30
-REFLEXES = 1
 
 deltas = np.eye(3)
 
 @jit(nopython=True)
 def normal(p: np.ndarray, DE, de: np.double, dif: np.double=1e-6) -> np.ndarray:
-    # normal computation
+    # normal vector to surface
     n = np.zeros(3)
     for i in range(3):
         d = deltas[i]
@@ -25,8 +23,6 @@ def normal(p: np.ndarray, DE, de: np.double, dif: np.double=1e-6) -> np.ndarray:
     leng = np.linalg.norm(n)
     n = n/leng
     return n
-
-def reflex(p, n, remaining_reflex):
     
 @jit(nopython=True)
 def shadow(p, normal, light, DE, light_spread=0.001) -> float:
@@ -100,7 +96,53 @@ def march(origin, direction, DE, light: np.ndarray) -> np.ndarray:
 
     return m*(.2+.8*(s+shadowed))
 
+def smooth(image):
+    new_image = image[:-1,:-1,:] + image[:-1,1:,:] + image[1:,:-1,:] + image[1:,1:,:]
+    return new_image/4.
+
+@jit(nopython=True)
+def my_cross(a, b):
+    ax, ay, az = a
+    bx, by, bz = b
+    c = [ay*bz-az*by, az*bx-ax*bz, ax*by-ay*bx]
+    return np.array(c, np.double)
     
+@jit(nopython=True)
+def v(i, j, main_axe, x, y):
+    v_ = main_axe + i*x + j*y
+    len_v_ = np.linalg.norm(v_)
+    v_unit = v_/len_v_
+    return v_unit
+
+@jit(nopython=True)
+def screen(origin, target, shape=(80,80), diag=1.):
+    """
+    :type origin: np.ndArray() shape=(3,)
+    :type target: np.ndArray() shape=(3,)
+    :type shape: Tuple
+    :type diag: float
+    :return type: np.ndArray() shape=(shape[0]*shape[1],3)
+    """
+    main_axe = target-origin
+    shape_arr = np.array(shape, dtype=np.double)
+    shape_arr_len = np.linalg.norm(shape_arr)
+    unit = diag/shape_arr_len
+    z = np.array((0.,0.,1.))
+    horiz_ = my_cross(main_axe, z)
+    verti_ = my_cross(horiz_, main_axe)
+    len_horiz = np.linalg.norm(horiz_)
+    len_verti = np.linalg.norm(verti_)
+    x = unit*horiz_/len_horiz
+    y = unit*verti_/len_verti
+    yr, xr = shape
+    x0, y0 = xr/2, yr/2
+    iterable = [(-x0+n%xr, y0-n//xr) for n in range(xr*yr)]
+    scr_ = []
+    for i, j in iterable:
+        v_ = v(i,j, main_axe, x, y)
+        scr_.append(v_)
+    scr = np.array(scr_)
+    return scr
 
 @jit(nopython=True)
 def render(origin, target, DE, light, shape=(80,80), limits=((-1,1),(-1,1)), diag=1., space=None):
@@ -115,30 +157,37 @@ def render(origin, target, DE, light, shape=(80,80), limits=((-1,1),(-1,1)), dia
         p = space[i]
         image[i, :] = march(p,dir,DE,light)
 
+    print('render finished')
     image = image.reshape(*shape,3)
     return image
 
-@jit(nopython=True)
-def fase_DE(p, fase):
-    ax1 = np.array((.3, -1., .7))*np.sin(fase)
-    ax2 = np.array((.6, .6, .1))*np.cos(fase)
-    centre = np.array((.0, .4, .0))
-    satelite = centre + ax1 + ax2
+if __name__ == "__main__":
 
-    a = np.linalg.norm(p - centre) - .5
-    b = np.linalg.norm(p - satelite) - .3
-    c = ((p-np.array((0,0,-1)))*np.array((0, .1, 1.))).sum()
-    return min((a,b,c))
+    import time
+    s = time.perf_counter()
 
-def new_image(fase, wide):
+    @jit(nopython=True)
+    def fase_DE(p, fase):
+        ax1 = np.array((.4, -1., .5))*np.sin(fase)
+        ax2 = np.array((.6, .6, .1))*np.cos(fase)
+        centre = np.array((.0, .2, .0))
+        satelite = centre + ax1 + ax2
 
-    shape = (wide, wide)
+        a = np.linalg.norm(p - centre) - .5
+        b = np.linalg.norm(p - satelite) - .3
+        c = ((p-np.array((0,0,-1)))*np.array((0, .1, 1.))).sum()
+        return min((a,b,c))
+
 
     origin = np.array((0.,0.,5.))
     target = np.array((0.,0.,0.))
     light = np.array((1.,1.,1.))
     eye = np.array((.2,.0,.0))
+
+    shape = (40, 40)
     limits = ((-2,1.5),(-2,1.5))
+
+    scr = screen(origin, target, shape, diag=3.)
 
     # space is a list of points in the space from where the ray-marching starts
     x = np.flip(np.linspace(*limits[0], shape[0]))
@@ -151,60 +200,54 @@ def new_image(fase, wide):
     light_len = np.linalg.norm(light)
     light = light/light_len
 
-    # fase = -.2
+    def new_image(fase):
+        # fase = -.2
 
-    @jit(nopython=True)
-    def comp_DE(p):
-        return fase_DE(p, fase)
+        @jit(nopython=True)
+        def comp_DE(p):
+            return fase_DE(p, fase)
 
-    kws = dict(origin=origin+eye, target=target, 
-                DE=comp_DE, light=light, 
-                shape=shape, limits=limits,
-                space=space)
-    imageL = render(**kws)
+        # comp_DE = fase_DE
 
-    kws = dict(origin=origin-eye, target=target, 
-                DE=comp_DE, light=light, 
-                shape=shape, limits=limits,
-                space=space)
-    imageR = render(**kws)
+        kws = dict(origin=origin+eye, target=target, 
+                    DE=comp_DE, light=light, 
+                    shape=shape, limits=limits,
+                    space=space)
+        imageL = render(**kws)
 
-    image = np.concatenate([imageL,imageR], axis=1)
+        kws = dict(origin=origin-eye, target=target, 
+                    DE=comp_DE, light=light, 
+                    shape=shape, limits=limits,
+                    space=space)
+        imageR = render(**kws)
 
-    return image
-
-
-import matplotlib.pyplot as plt    
-from matplotlib.animation import FuncAnimation
-from matplotlib.image import imsave
-from os import rename
-
-fig = plt.figure()
-ax = fig.add_axes([0, 0, 1, 1])
-
-s = time.time()
-rendered_image = np.clip(new_image(s, 400), 0, 1)
-eta = (time.time() - s)
-print('render finished in ', eta, ' s')
-
-file_ = str(time.time())+'.jpg'
-imsave(file_, rendered_image)
-im = ax.imshow(rendered_image)
+        image = np.concatenate([imageL,imageR], axis=1)
+        return image
 
 
-plt.show()
+    f = time.perf_counter()
+    elapsed = f - s
+    print(f"{__file__} executed in {elapsed:0.6f} seconds.")
 
+    import matplotlib.pyplot as plt    
+    from matplotlib.animation import FuncAnimation
+    from os import rename
 
-from numba import jit
-import numpy as np
+    fig = plt.figure()
+    ax = fig.add_axes([0, 0, 1, 1])
+    im = ax.imshow(new_image(0.))
 
-x = np.arange(100).reshape(10, 10)
+    def update(i):
+        im.set_data(new_image(i))
+        return im,
 
-@jit(nopython=True) # Set "nopython" mode for best performance, equivalent to @njit
-def go_fast(a): # Function is compiled to machine code when called the first time
-    trace = 0
-    for i in range(a.shape[0]):   # Numba likes loops
-        trace += np.tanh(a[i, i]) # Numba likes NumPy functions
-    return a + trace              # Numba likes NumPy broadcasting
+    file = str(time.time())+'.gif'
+    p = time.perf_counter()
+    fnAn = FuncAnimation(fig, update, frames=np.linspace(np.pi/12,2*np.pi,2), interval=.02, blit=True, repeat=True)
+    fnAn.save(file, dpi=80, writer='imagemagick')
+    elapsed = int(time.perf_counter() - p)
+    # rename(file, f'numbatest_eta{elapsed:d}s.gif')
 
-print(go_fast(x))
+    # plt.imshow(new_image(.6))
+
+    # plt.show()
