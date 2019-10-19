@@ -3,8 +3,8 @@ import asyncio
 import numpy as np
 
 
-dif = 1e-6
-DIST_LIMIT = 1e-3
+dif = 1e-8
+DIST_LIMIT = 1e-6
 COUNT_LIMIT = 100
 MAX_DIST = 30
 
