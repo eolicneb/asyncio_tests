@@ -200,6 +200,8 @@ class ComposeDE():
 
 if __name__ == "__main__":
 
+    moovie = True
+
     import matplotlib.pyplot as plt    
     from matplotlib.animation import FuncAnimation
     from os import rename
@@ -212,40 +214,52 @@ if __name__ == "__main__":
     pln_DE = PlaneDE(normal=np.array((0, .1, 1.)), pos=np.array((0,0,-1)))
     comp_DE = ComposeDE([sph_DE, sph2_DE, pln_DE])
 
-    @jit(nopython=True)
-    def fase_DE(p, fase):
-        ax1 = np.array((.4, -1., .5))*np.sin(fase)
-        ax2 = np.array((.6, .6, .1))*np.cos(fase)
-        centre = np.array((.0, .2, .0))
-        satelite = centre + ax1 + ax2
-        sph_DE.pos = centre
-        sph2_DE.pos = satelite
-        return comp_DE.__call__
-
     # @jit(nopython=True)
     # def fase_DE(p, fase):
     #     ax1 = np.array((.4, -1., .5))*np.sin(fase)
     #     ax2 = np.array((.6, .6, .1))*np.cos(fase)
     #     centre = np.array((.0, .2, .0))
     #     satelite = centre + ax1 + ax2
-    #     a = np.linalg.norm(p - centre) - .5
-    #     b = np.linalg.norm(p - satelite) - .3
-    #     c = ((p-np.array((0,0,-1)))*np.array((0, .1, 1.))).sum()
-    #     return min((a,b,c))
+    #     sph_DE.pos = centre
+    #     sph2_DE.pos = satelite
+    #     return comp_DE.__call__
 
-    origin = np.array((1.,0.,5.))
-    target = np.array((0.,0.,0.))
+    @jit(nopython=True)
+    def fase_DE(p, fase):
+        ax1 = np.array((.4, -1., .7))*np.sin(fase)
+        ax2 = np.array((1.2, 1.2, .1))*np.cos(fase)
+        centre = np.array((.0, .2, .0))
+        satelite = centre + ax1 + ax2
+        plano = np.array((0, .1, 1.))
+        a = np.linalg.norm(p - centre) - .5
+        b = np.linalg.norm(p - satelite) - .3
+        c = ((p-np.array((0,0,-1.5)))*plano).sum()
+        min_obj = np.argmin(np.array((a,b,c)))
+        switcher = {
+            0: (a,
+                ((p-centre)/(a+.5))**2,
+                (p-centre)/(a+.5)),
+            1: (b,
+                1.-((p-satelite)/(b+.3))**2,
+                (p-satelite)/(b+.3))
+        }
+        default = (c,
+                   np.ones((3,), np.double)*(int(p[0]*2)%2==int(p[1]*2)%2),
+                   plano)
+        return switcher.get(min_obj, default)
+
+    origin = np.array((2.,-1.,5.))
+    target = np.array((0.,0.,-2.))
     light = np.array((1.,1.,1.))
     eye = np.array((.2,.0,.0))
 
-    shape = (800, 600)
+    shape = (200, 180)
 
     # light needs to be normalized
     light_len = np.linalg.norm(light)
     light = light/light_len
-
-    scrL = screen(origin+eye, target, shape, diag=3.)
-    scrR = screen(origin-eye, target, shape, diag=3.)
+    scrL = screen(origin+eye, target, shape, diag=8.)
+    scrR = screen(origin-eye, target, shape, diag=8.)
 
     def new_image(fase):
         # fase = -.2
@@ -270,25 +284,28 @@ if __name__ == "__main__":
         return image
 
 
-    # f = time.perf_counter()
-    # elapsed = f - s
-    # print(f"{__file__} executed in {elapsed:0.6f} seconds.")
-
     fig = plt.figure()
     ax = fig.add_axes([0, 0, 1, 1])
-    im = ax.imshow(new_image(0.))
+    im = ax.imshow(np.zeros((shape[0],shape[1]*2)))
 
-    def update(i):
-        im.set_data(new_image(i))
-        return im,
+    if moovie:
+        # f = time.perf_counter()
+        # elapsed = f - s
+        # print(f"{__file__} executed in {elapsed:0.6f} seconds.")
 
-    file = str(time.time())+'.gif'
-    # p = time.perf_counter()
-    fnAn = FuncAnimation(fig, update, frames=np.linspace(np.pi/12,.2*np.pi,2), interval=.02, blit=True, repeat=True)
-    fnAn.save(file, dpi=80, writer='imagemagick')
-    # elapsed = int(time.perf_counter() - p)
-    # rename(file, f'numbatest_eta{elapsed:d}s.gif')
+        def update(i):
+            im.set_data(new_image(i))
+            return im,
 
-    # plt.imshow(new_image(.6))
+        file = 'images/'+str(time.time())+'.gif'
+        # p = time.perf_counter()
+        fnAn = FuncAnimation(fig, update, frames=np.linspace(np.pi/6,2*np.pi,12), interval=.02, blit=True, repeat=True)
+        fnAn.save(file, dpi=80, writer='imagemagick')
+        # elapsed = int(time.perf_counter() - p)
+        # rename(file, f'numbatest_eta{elapsed:d}s.gif')
 
-    # plt.show()
+    else:
+
+        plt.imshow(new_image(.6))
+
+        plt.show()
